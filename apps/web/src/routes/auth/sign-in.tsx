@@ -4,7 +4,7 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 import { Github, KeyRound, UserCheck } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { z } from "zod/v4";
 import PageTitle from "@/components/page-title";
@@ -42,19 +42,20 @@ function SignIn() {
   const [isGuestLoading, setIsGuestLoading] = useState(false);
   const lastLoginMethod = authClient.getLastUsedLoginMethod();
   const { data: config, isLoading: isConfigLoading } = useGetConfig();
+  const autoLoginTriggered = useRef(false);
 
   const invitationId = search.invitationId;
   const defaultEmail = search.email;
 
-  const getSafeRedirectPath = () => {
+  const getSafeRedirectPath = useCallback(() => {
     const redirectPath = search.redirect;
     if (redirectPath?.startsWith("/") && !redirectPath.includes("//")) {
       return redirectPath;
     }
     return undefined;
-  };
+  }, [search.redirect]);
 
-  const getCallbackUrl = () => {
+  const getCallbackUrl = useCallback(() => {
     const baseUrl = import.meta.env.VITE_CLIENT_URL;
     const redirectPath = getSafeRedirectPath();
     if (redirectPath) {
@@ -64,7 +65,7 @@ function SignIn() {
       return `${baseUrl}/invitation/accept/${invitationId}`;
     }
     return `${baseUrl}/dashboard`;
-  };
+  }, [invitationId, getSafeRedirectPath]);
 
   const handleGuestAccess = async () => {
     setIsGuestLoading(true);
@@ -84,7 +85,7 @@ function SignIn() {
     }
   };
 
-  const handleCustomOAuth = async () => {
+  const handleCustomOAuth = useCallback(async () => {
     setIsCustomOAuthLoading(true);
     try {
       const result = await authClient.signIn.oauth2({
@@ -102,7 +103,7 @@ function SignIn() {
     } finally {
       setIsCustomOAuthLoading(false);
     }
-  };
+  }, [getCallbackUrl, t]);
 
   const handleSignInGoogle = async () => {
     setIsGoogleLoading(true);
@@ -175,7 +176,21 @@ function SignIn() {
     }
   };
 
-  if (isConfigLoading) {
+  useEffect(() => {
+    if (
+      config?.customOAuthAutoLogin &&
+      config?.hasCustomOAuth &&
+      !autoLoginTriggered.current
+    ) {
+      autoLoginTriggered.current = true;
+      handleCustomOAuth();
+    }
+  }, [config, handleCustomOAuth]);
+
+  if (
+    isConfigLoading ||
+    (config?.customOAuthAutoLogin && config?.hasCustomOAuth)
+  ) {
     return (
       <>
         <PageTitle title={t("auth:signIn.pageTitle")} />
@@ -346,38 +361,44 @@ function SignIn() {
                 )}
               </div>
 
-              <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-border" />
+              {!config?.disableLoginForm && (
+                <div className="relative my-6">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-border" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-2 bg-card text-muted-foreground">
+                      {t("auth:forms.or")}
+                    </span>
+                  </div>
                 </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-card text-muted-foreground">
-                    {t("auth:forms.or")}
-                  </span>
-                </div>
-              </div>
+              )}
             </>
           )}
-          {config?.hasSmtp ? (
-            <OtpSignInForm
-              invitationId={invitationId}
-              defaultEmail={defaultEmail}
-              redirect={getSafeRedirectPath()}
-              onSuccess={handleSignInSuccess}
-            />
-          ) : (
-            <SignInForm
-              defaultEmail={defaultEmail}
-              onSuccess={handleSignInSuccess}
-            />
-          )}
+          {!config?.disableLoginForm &&
+            (config?.hasSmtp ? (
+              <OtpSignInForm
+                invitationId={invitationId}
+                defaultEmail={defaultEmail}
+                redirect={getSafeRedirectPath()}
+                onSuccess={handleSignInSuccess}
+              />
+            ) : (
+              <SignInForm
+                defaultEmail={defaultEmail}
+                onSuccess={handleSignInSuccess}
+              />
+            ))}
           {config?.disableRegistration ||
-          config?.disablePasswordRegistration ? (
+          config?.disablePasswordRegistration ||
+          config?.disableLoginForm ? (
             <div className="text-center pt-4">
               <p className="text-sm text-muted-foreground">
                 {config?.disableRegistration
                   ? t("auth:signIn.registrationDisabled")
-                  : t("auth:signIn.passwordRegistrationDisabled")}
+                  : config?.disableLoginForm
+                    ? ""
+                    : t("auth:signIn.passwordRegistrationDisabled")}
               </p>
             </div>
           ) : (
